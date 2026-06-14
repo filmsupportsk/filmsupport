@@ -2801,7 +2801,7 @@ function Quotes({ nav }) {
   const upsert = (qt) => { const n = list.some(x => x.id === qt.id) ? list.map(x => x.id === qt.id ? qt : x) : [qt, ...list]; save(n); };
   const today = todayStr();
   const newNumber = () => `CP-${new Date().getFullYear()}-${String(list.length + 1).padStart(3, "0")}`;
-  const blank = () => ({ id: uid(), number: newNumber(), createdAt: today, date: today, validUntil: "", lang: "sk", design: LS.get("fs_display_v1")?.quoteDesign || "minimal", client: { name: "", company: "", email: "", phone: "", address: "" }, project: "", days: 1, vatPct: 23, orderDiscountPct: 0, notes: "", items: [] });
+  const blank = () => ({ id: uid(), number: newNumber(), createdAt: today, date: today, validUntil: "", lang: "sk", design: LS.get("fs_display_v1")?.quoteDesign || "minimal", client: { name: "", company: "", email: "", phone: "", address: "", ico: "", dic: "" }, project: "", contact: "", location: "", days: 1, vatPct: 23, orderDiscountPct: 0, notes: "", items: [] });
   const fromTemplate = (tpl) => { setTplOpen(false); setEdit({ ...blank(), items: (tpl.items || []).map(i => ({ ...i, id: uid() })) }); };
   const fromOrder = (o) => { setBuilding(true); api.orders.getDetail(o).then(det => setEdit(buildQuoteFromOrder(o, det, blank()))).catch(() => window.alert("Detail objednávky sa nepodarilo načítať.")).finally(() => { setBuilding(false); setImportOpen(false); }); };
 
@@ -2927,6 +2927,49 @@ function QuoteEditor({ quote, company, onClose, onSave }) {
   const lbl = { fontSize: 11, fontWeight: 800, color: C.t3, display: "block", marginBottom: 3 };
   const inp = { width: "100%", background: C.s2, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: C.font, outline: "none", boxSizing: "border-box" };
   const cell = { background: "transparent", border: `1px solid ${C.border}`, borderRadius: 6, padding: "5px 6px", fontSize: 12.5, fontFamily: C.font, outline: "none", textAlign: "center", boxSizing: "border-box" };
+  const [vw, setVw] = useState(() => LS.get("fs_quoteview", { cats: true, photos: true, sku: false }));
+  const setView = (patch) => { const n = { ...vw, ...patch }; setVw(n); LS.set("fs_quoteview", n); };
+  const [collapsed, setCollapsed] = useState({});
+  const invByKey = useMemo(() => { const m = {}; for (const x of inv) { if (x.sku) m["s:" + fold(x.sku)] = x; m["n:" + fold(x.name)] = x; } return m; }, [inv.length]);
+  const photoOf = (l) => ((l.sku && invByKey["s:" + fold(l.sku)]) || invByKey["n:" + fold(l.name)])?.photo_url || null;
+  const itemLines = qt.items.filter(l => l.kind !== "section");
+  const groups = vw.cats ? (() => { const m = new Map(); for (const l of itemLines) { const c = categorize(l.name) || "Other"; if (!m.has(c)) m.set(c, []); m.get(c).push(l); } return [...m.entries()].map(([name, list]) => ({ name, color: catColor(name) === CAT_FALLBACK.color ? avaColor(name) : catColor(name), list, sum: list.reduce((s, l) => s + qLineNet(l), 0) })); })() : null;
+  const COL = { ks: 54, rate: 86, disc: 66, days: 52, total: 100 };
+
+  // editovateľný riadok položky (štýl ako objednávka)
+  const ItemRow = ({ l }) => { const g = qLineGross(l), n = qLineNet(l), disc = l.discountPct || 0; const ph = photoOf(l);
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 16px", borderBottom: `1px solid ${C.border}` }}>
+        {vw.photos && (ph ? <img src={ph} loading="lazy" alt="" style={{ width: 34, height: 34, borderRadius: 7, objectFit: "cover", border: `1px solid ${C.border}`, flexShrink: 0 }} /> : <div style={{ width: 34, height: 34, borderRadius: 7, background: C.s2, border: `1px solid ${C.border}`, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>🎬</div>)}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <input value={l.name} onChange={e => setItem(l.id, { name: e.target.value })} placeholder="Názov položky" style={{ width: "100%", border: "1px solid transparent", background: "transparent", fontSize: 13.5, fontWeight: 700, color: C.t1, fontFamily: C.display, outline: "none", padding: "2px 4px", borderRadius: 6 }}
+            onFocus={e => e.target.style.background = C.s2} onBlur={e => e.target.style.background = "transparent"} />
+          {vw.sku && l.sku && <div style={{ fontSize: 10, color: C.t3, fontFamily: C.mono, padding: "0 4px" }}>{l.sku}</div>}
+        </div>
+        <input value={l.qty} onChange={e => setItem(l.id, { qty: Math.max(0, Number(e.target.value) || 0) })} style={{ ...cell, width: COL.ks }} />
+        <input value={(l.unitCents / 100) || ""} onChange={e => setItem(l.id, { unitCents: Math.round((Number(e.target.value) || 0) * 100) })} placeholder="0" style={{ ...cell, width: COL.rate }} />
+        <input value={disc || ""} onChange={e => setItem(l.id, { discountPct: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })} placeholder="0%" style={{ ...cell, width: COL.disc, color: disc > 0 ? C.red : C.t1, fontWeight: disc > 0 ? 800 : 400 }} />
+        <input value={l.days} onChange={e => setItem(l.id, { days: Math.max(1, Number(e.target.value) || 1) })} style={{ ...cell, width: COL.days }} />
+        <div style={{ width: COL.total, textAlign: "right", flexShrink: 0 }}>
+          {disc > 0 && <div style={{ fontSize: 10.5, color: C.t3, textDecoration: "line-through" }}>{eur(g)}</div>}
+          <div style={{ fontSize: 13, fontWeight: 700, color: C.t1, fontFamily: C.mono }}>{eur(n)}</div>
+        </div>
+        <button onClick={() => delItem(l.id)} title="Zmazať" style={{ border: "none", background: "transparent", color: C.t3, cursor: "pointer", fontSize: 15, flexShrink: 0, width: 22 }}>×</button>
+      </div>
+    );
+  };
+  const ColHead = () => (
+    <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "10px 16px", fontSize: 10, fontWeight: 800, color: C.t3, textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: `1px solid ${C.border}` }}>
+      {vw.photos && <div style={{ width: 34, flexShrink: 0 }} />}
+      <div style={{ flex: 1 }}>Položka</div>
+      <div style={{ width: COL.ks, textAlign: "center" }}>Ks</div>
+      <div style={{ width: COL.rate, textAlign: "center" }}>Denná sadzba</div>
+      <div style={{ width: COL.disc, textAlign: "center" }}>Zľava</div>
+      <div style={{ width: COL.days, textAlign: "center" }}>Dni</div>
+      <div style={{ width: COL.total, textAlign: "right" }}>Celkom</div>
+      <div style={{ width: 22 }} />
+    </div>
+  );
 
   return (
     <div>
@@ -2949,81 +2992,95 @@ function QuoteEditor({ quote, company, onClose, onSave }) {
         </div>
       </div>
 
+      {/* karta klienta — ako v objednávke, editovateľná */}
       <Card style={{ marginBottom: 14 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px,1fr))", gap: 12 }}>
-          <div><span style={lbl}>KLIENT</span><input value={qt.client.name} onChange={e => setClient("name", e.target.value)} placeholder="Meno / firma" style={inp} /></div>
-          <div><span style={lbl}>FIRMA / IČO</span><input value={qt.client.company} onChange={e => setClient("company", e.target.value)} placeholder="Spoločnosť" style={inp} /></div>
-          <div><span style={lbl}>E-MAIL</span><input value={qt.client.email} onChange={e => setClient("email", e.target.value)} style={inp} /></div>
-          <div><span style={lbl}>PROJEKT</span><input value={qt.project} onChange={e => set({ project: e.target.value })} style={inp} /></div>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <span style={{ width: 52, height: 52, borderRadius: "50%", background: avaColor(qt.client.name || "?"), color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 800, flexShrink: 0 }}>{initials(qt.client.name || "?")}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <input value={qt.client.name} onChange={e => setClient("name", e.target.value)} placeholder="Meno klienta / firma" style={{ width: "100%", border: "1px solid transparent", background: "transparent", fontSize: 20, fontWeight: 800, color: C.t1, fontFamily: C.display, outline: "none", padding: "2px 4px", borderRadius: 6 }} onFocus={e => e.target.style.background = C.s2} onBlur={e => e.target.style.background = "transparent"} />
+            <input value={qt.client.company} onChange={e => setClient("company", e.target.value)} placeholder="Spoločnosť / poznámka" style={{ width: "100%", border: "1px solid transparent", background: "transparent", fontSize: 13, color: C.t2, fontFamily: C.font, outline: "none", padding: "1px 4px", borderRadius: 6 }} onFocus={e => e.target.style.background = C.s2} onBlur={e => e.target.style.background = "transparent"} />
+          </div>
+        </div>
+        <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 14, paddingTop: 14, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px,1fr))", gap: 14 }}>
+          {[["email", "E-MAIL"], ["phone", "TELEFÓN"], ["address", "ADRESA"], ["ico", "IČO"], ["dic", "DIČ"]].map(([k, l]) => (
+            <div key={k}><span style={lbl}>{l}</span><input value={qt.client[k] || ""} onChange={e => setClient(k, e.target.value)} style={{ ...inp, padding: "6px 8px" }} /></div>
+          ))}
+        </div>
+      </Card>
+
+      {/* karta projektu — viac detailov */}
+      <Card style={{ marginBottom: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px,1fr))", gap: 12 }}>
+          <div><span style={lbl}>PROJEKT</span><input value={qt.project} onChange={e => set({ project: e.target.value })} placeholder="Názov projektu" style={inp} /></div>
+          <div><span style={lbl}>KONTAKTNÁ OSOBA</span><input value={qt.contact || ""} onChange={e => set({ contact: e.target.value })} style={inp} /></div>
+          <div><span style={lbl}>MIESTO / LOKÁCIA</span><input value={qt.location || ""} onChange={e => set({ location: e.target.value })} style={inp} /></div>
           <div><span style={lbl}>DÁTUM</span><input type="date" value={qt.date} onChange={e => set({ date: e.target.value })} style={inp} /></div>
           <div><span style={lbl}>PLATÍ DO</span><input type="date" value={qt.validUntil} onChange={e => set({ validUntil: e.target.value })} style={inp} /></div>
-          <div><span style={lbl}>DNI (default)</span><input type="number" min={1} value={qt.days} onChange={e => set({ days: Math.max(1, Number(e.target.value) || 1) })} style={inp} /></div>
+          <div><span style={lbl}>POČET DNÍ</span><input type="number" min={1} value={qt.days} onChange={e => set({ days: Math.max(1, Number(e.target.value) || 1) })} style={inp} /></div>
         </div>
+        <div style={{ marginTop: 12 }}><span style={lbl}>POZNÁMKA</span><textarea value={qt.notes} onChange={e => set({ notes: e.target.value })} placeholder="Poznámky k ponuke, podmienky…" style={{ ...inp, minHeight: 56, resize: "vertical" }} /></div>
       </Card>
 
       {asst && <QuoteAssistant items={qt.items} onAdd={addByName} />}
 
-      {/* pridať položku */}
-      <Card style={{ marginBottom: 14 }}>
-        <span style={lbl}>PRIDAŤ POLOŽKU Z INVENTÁRA</span>
-        <input value={pick} onChange={e => setPick(e.target.value)} placeholder="Hľadaj techniku, SKU…" style={{ ...inp, marginBottom: results.length ? 8 : 0 }} />
-        {results.map(r => (
-          <div key={r.id} onClick={() => { addItem({ id: uid(), kind: "item", name: r.name, sku: r.sku, qty: 1, days: qt.days, unitCents: r.base_price_in_cents || 0, discountPct: r.zlava || 0 }); setPick(""); }}
-            style={{ display: "flex", justifyContent: "space-between", padding: "7px 10px", borderRadius: 7, cursor: "pointer", fontSize: 13 }}
-            onMouseEnter={e => e.currentTarget.style.background = C.s2} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-            <span style={{ color: C.t1, fontWeight: 600 }}>{r.name}</span>
-            <span style={{ color: C.t2, fontFamily: C.mono }}>{r.base_price_in_cents ? eur(r.base_price_in_cents) : "—"}</span>
-          </div>
-        ))}
-        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-          <Btn onClick={() => addItem({ id: uid(), kind: "section", name: "Sekcia" })}>+ Sekcia / nadpis</Btn>
-          <Btn onClick={() => addItem({ id: uid(), kind: "item", name: "", qty: 1, days: qt.days, unitCents: 0, discountPct: 0 })}>+ Prázdny riadok</Btn>
-        </div>
-      </Card>
-
-      {/* riadky */}
+      {/* technika — pridávanie + zobrazenie ako objednávka */}
       <Card style={{ marginBottom: 14, padding: 0, overflow: "hidden" }}>
-        <div style={{ display: "flex", gap: 8, padding: "10px 14px", fontSize: 10, fontWeight: 800, color: C.t3, textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: `1px solid ${C.border}` }}>
-          <div style={{ flex: 1 }}>Položka</div>
-          <div style={{ width: 50, textAlign: "center" }}>Ks</div>
-          <div style={{ width: 50, textAlign: "center" }}>Dni</div>
-          <div style={{ width: 90, textAlign: "center" }}>Cena/deň</div>
-          <div style={{ width: 64, textAlign: "center" }}>Zľava</div>
-          <div style={{ width: 96, textAlign: "right" }}>Spolu</div>
-          <div style={{ width: 26 }} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "12px 16px", borderBottom: `1px solid ${C.border}`, flexWrap: "wrap" }}>
+          <div style={{ fontFamily: C.display, fontWeight: 800, fontSize: 15, color: C.t1 }}>Technika <span style={{ color: C.t3, fontWeight: 600 }}>({itemLines.length})</span></div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {[["cats", "Kategórie"], ["photos", "Fotky"], ["sku", "SKU"]].map(([k, l]) => (
+              <button key={k} onClick={() => setView({ [k]: !vw[k] })} style={{ border: `1.5px solid ${vw[k] ? C.gold : C.border}`, background: vw[k] ? C.goldGlow : C.s1, color: vw[k] ? C.gold : C.t2, borderRadius: 8, padding: "5px 11px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: C.font }}>{l}</button>
+            ))}
+          </div>
         </div>
-        {qt.items.length === 0 ? <div style={{ padding: 24, textAlign: "center", color: C.t3, fontSize: 13 }}>Zatiaľ žiadne položky</div>
-          : qt.items.map(l => l.kind === "section" ? (
-            <div key={l.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 14px", background: C.s2, borderBottom: `1px solid ${C.border}` }}>
-              <input value={l.name} onChange={e => setItem(l.id, { name: e.target.value })} style={{ ...inp, fontWeight: 800, flex: 1 }} />
-              <Btn v="danger" onClick={() => delItem(l.id)} style={{ padding: "5px 9px" }}>×</Btn>
-            </div>
-          ) : (() => { const g = qLineGross(l), n = qLineNet(l), disc = l.discountPct || 0; return (
-            <div key={l.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 14px", borderBottom: `1px solid ${C.border}` }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <input value={l.name} onChange={e => setItem(l.id, { name: e.target.value })} placeholder="Názov položky" style={{ ...inp, padding: "6px 8px" }} />
-                {l.sku && <div style={{ fontSize: 10, color: C.t3, fontFamily: C.mono, marginTop: 2 }}>{l.sku}</div>}
+        {/* pridať */}
+        <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.border}`, position: "relative" }}>
+          <input value={pick} onChange={e => setPick(e.target.value)} placeholder="🔍 Pridaj techniku — hľadaj názov, SKU…" style={inp} />
+          {results.length > 0 && <div style={{ position: "absolute", left: 16, right: 16, zIndex: 5, background: C.s1, border: `1px solid ${C.border}`, borderRadius: 10, boxShadow: C.shadow, marginTop: 4, overflow: "hidden" }}>
+            {results.map(r => (
+              <div key={r.id} onClick={() => { addItem({ id: uid(), kind: "item", name: r.name, sku: r.sku, qty: 1, days: qt.days, unitCents: r.base_price_in_cents || 0, discountPct: r.zlava || 0 }); setPick(""); }}
+                style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", padding: "8px 12px", cursor: "pointer", fontSize: 13 }}
+                onMouseEnter={e => e.currentTarget.style.background = C.s2} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <span style={{ color: C.t1, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</span>
+                <span style={{ color: C.t2, fontFamily: C.mono, flexShrink: 0 }}>{r.base_price_in_cents ? eur(r.base_price_in_cents) : "—"}</span>
               </div>
-              <input value={l.qty} onChange={e => setItem(l.id, { qty: Math.max(0, Number(e.target.value) || 0) })} style={{ ...cell, width: 50 }} />
-              <input value={l.days} onChange={e => setItem(l.id, { days: Math.max(1, Number(e.target.value) || 1) })} style={{ ...cell, width: 50 }} />
-              <input value={(l.unitCents / 100) || ""} onChange={e => setItem(l.id, { unitCents: Math.round((Number(e.target.value) || 0) * 100) })} placeholder="0" style={{ ...cell, width: 90 }} />
-              <input value={disc || ""} onChange={e => setItem(l.id, { discountPct: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })} placeholder="0%" style={{ ...cell, width: 64, color: disc > 0 ? C.red : C.t1, fontWeight: disc > 0 ? 800 : 400 }} />
-              <div style={{ width: 96, textAlign: "right", flexShrink: 0 }}>
-                {disc > 0 && <div style={{ fontSize: 10.5, color: C.t3, textDecoration: "line-through" }}>{eur(g)}</div>}
-                <div style={{ fontSize: 13, fontWeight: 700, color: C.t1, fontFamily: C.mono }}>{eur(n)}</div>
+            ))}
+          </div>}
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <Btn onClick={() => addItem({ id: uid(), kind: "item", name: "", qty: 1, days: qt.days, unitCents: 0, discountPct: 0 })}>+ Prázdny riadok</Btn>
+            {!vw.cats && <Btn onClick={() => addItem({ id: uid(), kind: "section", name: "Sekcia" })}>+ Sekcia</Btn>}
+          </div>
+        </div>
+
+        {itemLines.length === 0 ? <div style={{ padding: 28, textAlign: "center", color: C.t3, fontSize: 13 }}>Zatiaľ žiadne položky — pridaj techniku vyššie</div>
+          : vw.cats ? <>
+            <ColHead />
+            {groups.map(g => { const open = !collapsed[g.name]; return (
+              <div key={g.name}>
+                <div onClick={() => setCollapsed(c => ({ ...c, [g.name]: !c[g.name] }))} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px", background: C.s2, borderBottom: `1px solid ${C.border}`, cursor: "pointer" }}>
+                  <span style={{ fontSize: 10, color: C.t3, transform: open ? "none" : "rotate(-90deg)", transition: "transform .15s" }}>▾</span>
+                  <span style={{ background: g.color, color: "#fff", fontFamily: C.display, fontWeight: 800, fontSize: 11.5, borderRadius: 8, padding: "3px 11px" }}>{g.name}</span>
+                  <span style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 700, color: C.t3 }}>{g.list.length} pol. · {eur(g.sum)}</span>
+                </div>
+                {open && g.list.map(l => <ItemRow key={l.id} l={l} />)}
               </div>
-              <Btn v="danger" onClick={() => delItem(l.id)} style={{ padding: "5px 9px" }}>×</Btn>
-            </div>
-          ); })())}
+            ); })}
+          </> : <>
+            <ColHead />
+            {qt.items.map(l => l.kind === "section"
+              ? <div key={l.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 16px", background: C.s2, borderBottom: `1px solid ${C.border}` }}>
+                  <input value={l.name} onChange={e => setItem(l.id, { name: e.target.value })} style={{ ...inp, fontWeight: 800, flex: 1, padding: "5px 8px" }} />
+                  <button onClick={() => delItem(l.id)} style={{ border: "none", background: "transparent", color: C.t3, cursor: "pointer", fontSize: 15 }}>×</button>
+                </div>
+              : <ItemRow key={l.id} l={l} />)}
+          </>}
       </Card>
 
       {/* súčty */}
       <Card>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          <div>
-            <span style={lbl}>POZNÁMKY</span>
-            <textarea value={qt.notes} onChange={e => set({ notes: e.target.value })} placeholder="Podmienky, poznámky k ponuke…" style={{ ...inp, minHeight: 90, resize: "vertical" }} />
-            <div style={{ display: "flex", gap: 12, marginTop: 10 }}>
+          <div style={{ alignSelf: "start" }}>
+            <div style={{ display: "flex", gap: 12 }}>
               <div style={{ flex: 1 }}><span style={lbl}>ZĽAVA NA PONUKU %</span><input type="number" value={qt.orderDiscountPct || ""} onChange={e => set({ orderDiscountPct: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })} style={inp} /></div>
               <div style={{ flex: 1 }}><span style={lbl}>DPH %</span><input type="number" value={qt.vatPct} onChange={e => set({ vatPct: Math.max(0, Number(e.target.value) || 0) })} style={inp} /></div>
             </div>
